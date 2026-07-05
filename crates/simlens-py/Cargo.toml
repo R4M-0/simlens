@@ -1,0 +1,15 @@
+[package]
+name = "simlens-py"
+description = "Python bindings for simlens-core."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+simlens-core = { path = "../simlens-core" }
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py38"] }

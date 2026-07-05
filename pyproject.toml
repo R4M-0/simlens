@@ -1,0 +1,34 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "simlens"
+version = "0.1.0"
+description = "Faithful, vector-only similarity & ranking attribution — the 'why' vector search never returns."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "Apache-2.0" }
+authors = [{ name = "ghassenov" }]
+keywords = ["embeddings", "interpretability", "vector-search", "explainability", "attribution", "sae"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+]
+dependencies = ["numpy>=1.21"]
+
+[project.optional-dependencies]
+serve = []
+dev = ["pytest>=7", "maturin>=1.7"]
+
+[project.urls]
+Repository = "https://github.com/ghassenov/simlens"
+
+[tool.maturin]
+manifest-path = "crates/simlens-py/Cargo.toml"
+python-source = "python"
+module-name = "simlens._native"
+features = ["pyo3/extension-module"]

@@ -1,7 +1,6 @@
 # Rust
 /target
 **/*.rs.bk
-Cargo.lock
 
 # Python
 __pycache__/
@@ -28,3 +27,7 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+
+# Internal-only working docs (kept local, not published)
+SPEC.md
+EVALUATION.md
