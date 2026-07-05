@@ -1,0 +1,30 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# maturin / native artifacts
+*.so
+*.pyd
+*.dylib
+
+# Model / bundle artifacts
+*.safetensors
+*.simlens/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
