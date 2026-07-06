@@ -68,3 +68,5 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          # tolerate files already on PyPI (e.g. re-running after a partial upload)
+          skip-existing: true

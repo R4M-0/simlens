@@ -55,3 +55,6 @@ manifest-path = "crates/simlens-py/Cargo.toml"
 python-source = "python"
 module-name = "simlens._native"
 features = ["pyo3/extension-module"]
+# Ship the license file inside the sdist too — the metadata declares `License-File: LICENSE`
+# and PyPI rejects the sdist if the file isn't actually present in the tarball.
+include = ["LICENSE"]
