@@ -30,10 +30,12 @@ jobs:
         run: |
           cargo test --workspace --exclude simlens-py
           cargo test -p simlens-core --features bundle
-      - name: build + install (maturin)
+      - name: build + install
+        # `maturin develop` needs an active virtualenv; `pip install` uses the maturin
+        # build backend directly, so it works on the bare CI runner (all OSes).
         run: |
-          pip install --upgrade pip maturin pytest hypothesis numpy
-          maturin develop --release
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
       - name: pytest
         run: pytest -q
 
@@ -60,8 +62,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: |
-          pip install --upgrade pip maturin pytest hypothesis numpy
-          maturin develop --release
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
       - name: faithfulness benchmark harness (regression guard)
         run: pytest -q tests/test_faithfulness_bench.py
       - name: perf harness smoke
