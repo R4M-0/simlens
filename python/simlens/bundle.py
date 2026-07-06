@@ -28,20 +28,26 @@ class Bundle:
     metric: str = "cosine"
     modality: str = "text"
 
-    # SAE (optional) — encoder + precomputed decoder column norms²
+    # SAE (optional) — full encoder + decoder (feature-major)
     w_enc: np.ndarray | None = None            # [n_features, dim]
     b_enc: np.ndarray | None = None            # [n_features]
-    dec_norm2: np.ndarray | None = None        # [n_features]
+    w_dec: np.ndarray | None = None            # [n_features, dim] (decoder atoms d_f)
+    b_dec: np.ndarray | None = None            # [dim]
     feature_names: list[str | None] = field(default_factory=list)
     feature_conf: list[float | None] = field(default_factory=list)
+    feature_source: list[str | None] = field(default_factory=list)  # payload|keyword|ai|manual
+    feature_exemplars: dict = field(default_factory=dict)  # feat index (str) -> [items]
 
     # Concepts (optional) — unit CAV directions
     concept_names: list[str] = field(default_factory=list)
     concept_dirs: np.ndarray | None = None     # [n_concepts, dim]
     concept_conf: list[float] = field(default_factory=list)
+    concept_source: list[str] = field(default_factory=list)  # examples | text
+    concept_exemplars: dict = field(default_factory=dict)  # concept name -> [items]
     aspects: dict[str, str] = field(default_factory=dict)  # concept -> aspect bucket
 
     content_hash: str | None = None
+    signature: str | None = None
 
     # ---- properties -----------------------------------------------------------
     @property
@@ -59,7 +65,7 @@ class Bundle:
     # ---- hashing / provenance -------------------------------------------------
     def compute_hash(self) -> str:
         chunks: list[bytes] = [self.embedder.encode(), str(self.dim).encode(), self.metric.encode()]
-        for arr in (self.w_enc, self.b_enc, self.dec_norm2, self.concept_dirs):
+        for arr in (self.w_enc, self.b_enc, self.w_dec, self.b_dec, self.concept_dirs):
             if arr is not None:
                 chunks.append(np.ascontiguousarray(arr, dtype=np.float32).tobytes())
         chunks.append(json.dumps(self.concept_names, sort_keys=True).encode())
@@ -73,6 +79,7 @@ class Bundle:
             "sae": None if not self.has_sae else {"n_features": self.n_features},
             "concepts": len(self.concept_names),
             "content_hash": self.content_hash,
+            "signature": self.signature,
         }
 
     # ---- IO -------------------------------------------------------------------
@@ -86,7 +93,8 @@ class Bundle:
             arrays.update(
                 w_enc=np.asarray(self.w_enc, dtype=np.float32),
                 b_enc=np.asarray(self.b_enc, dtype=np.float32),
-                dec_norm2=np.asarray(self.dec_norm2, dtype=np.float32),
+                w_dec=np.asarray(self.w_dec, dtype=np.float32),
+                b_dec=np.asarray(self.b_dec, dtype=np.float32),
             )
         if self.has_concepts:
             arrays["concept_dirs"] = np.asarray(self.concept_dirs, dtype=np.float32)
@@ -95,14 +103,23 @@ class Bundle:
 
         (path / "manifest.json").write_text(json.dumps(self._manifest(), indent=2))
         (path / "features.json").write_text(
-            json.dumps({"names": self.feature_names, "conf": self.feature_conf})
+            json.dumps(
+                {
+                    "names": self.feature_names,
+                    "conf": self.feature_conf,
+                    "source": self.feature_source,
+                    "exemplars": self.feature_exemplars,
+                }
+            )
         )
         (path / "concepts.json").write_text(
             json.dumps(
                 {
                     "names": self.concept_names,
                     "conf": self.concept_conf,
+                    "source": self.concept_source,
                     "aspects": self.aspects,
+                    "exemplars": self.concept_exemplars,
                 }
             )
         )
@@ -126,25 +143,52 @@ class Bundle:
             if "w_enc" in w:
                 b.w_enc = w["w_enc"]
                 b.b_enc = w["b_enc"]
-                b.dec_norm2 = w["dec_norm2"]
+                b.w_dec = w["w_dec"]
+                b.b_dec = w["b_dec"]
             if "concept_dirs" in w:
                 b.concept_dirs = w["concept_dirs"]
+        b.signature = manifest.get("signature")
         fp = path / "features.json"
         if fp.exists():
             f = json.loads(fp.read_text())
             b.feature_names = f.get("names", [])
             b.feature_conf = f.get("conf", [])
+            b.feature_source = f.get("source", [])
+            b.feature_exemplars = f.get("exemplars", {})
         cp = path / "concepts.json"
         if cp.exists():
             c = json.loads(cp.read_text())
             b.concept_names = c.get("names", [])
             b.concept_conf = c.get("conf", [])
+            b.concept_source = c.get("source", [])
             b.aspects = c.get("aspects", {})
+            b.concept_exemplars = c.get("exemplars", {})
         return b
 
     def verify(self) -> bool:
         """True iff the on-disk hash matches a fresh recomputation."""
         return self.content_hash == self.compute_hash()
+
+    def sign(self, secret: str) -> "Bundle":
+        """Attach an HMAC-SHA256 signature over the content hash (audit mode, §13.8)."""
+        import hmac
+
+        self.content_hash = self.compute_hash()
+        self.signature = "hmac:" + hmac.new(
+            secret.encode(), self.content_hash.encode(), hashlib.sha256
+        ).hexdigest()
+        return self
+
+    def verify_signature(self, secret: str) -> bool:
+        """True iff the signature matches `secret` over the current content hash."""
+        import hmac
+
+        if not self.signature or not self.signature.startswith("hmac:"):
+            return False
+        expect = hmac.new(
+            secret.encode(), self.compute_hash().encode(), hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(self.signature[len("hmac:") :], expect)
 
     def add_concept(
         self,
@@ -163,9 +207,46 @@ class Bundle:
             self.concept_dirs = np.vstack([self.concept_dirs, direction.reshape(1, -1)])
         self.concept_names.append(name)
         self.concept_conf.append(acc)
+        self.concept_source.append("examples")
         if aspect:
             self.aspects[name] = aspect
         return self
+
+    def add_text_concept(self, name: str, direction: np.ndarray, aspect: str | None = None) -> "Bundle":
+        """Register a zero-shot concept from an already-embedded phrase direction (§Part A).
+
+        `direction` is a raw (dim,) embedding of the concept phrase; it is unit-normalized
+        here. Confidence is 0.0 (unvalidated) until calibrated against examples.
+        """
+        d = np.asarray(direction, dtype=np.float32).ravel()
+        n = np.linalg.norm(d)
+        if n > 0:
+            d = d / n
+        if self.concept_dirs is None:
+            self.concept_dirs = d.reshape(1, -1)
+        else:
+            self.concept_dirs = np.vstack([self.concept_dirs, d.reshape(1, -1)])
+        self.concept_names.append(name)
+        self.concept_conf.append(0.0)
+        self.concept_source.append("text")
+        if aspect:
+            self.aspects[name] = aspect
+        return self
+
+    def rename_feature(self, index: int, name: str, source: str = "manual") -> "Bundle":
+        """Manually (re)name a feature — user override of auto/AI-proposed names."""
+        if index >= len(self.feature_names):
+            raise IndexError(f"feature {index} out of range")
+        self.feature_names[index] = name
+        if index < len(self.feature_source):
+            self.feature_source[index] = source
+        return self
+
+    def name_provenance(self) -> dict:
+        """Count named features by provenance (payload / keyword / ai / manual)."""
+        from collections import Counter
+
+        return dict(Counter(s for s in self.feature_source if s))
 
     # ---- native bridges -------------------------------------------------------
     def to_native_sae(self):
@@ -179,7 +260,8 @@ class Bundle:
             n,
             np.ascontiguousarray(self.w_enc, dtype=np.float32).tobytes(),
             np.ascontiguousarray(self.b_enc, dtype=np.float32).tobytes(),
-            np.ascontiguousarray(self.dec_norm2, dtype=np.float32).tobytes(),
+            np.ascontiguousarray(self.w_dec, dtype=np.float32).tobytes(),
+            np.ascontiguousarray(self.b_dec, dtype=np.float32).tobytes(),
         )
         sae.set_labels(names[:n], conf[:n])
         return sae

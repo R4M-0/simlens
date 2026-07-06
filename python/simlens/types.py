@@ -11,10 +11,13 @@ class Contribution:
     value: float
     confidence: float | None
     polarity: str  # "shared" | "query_only" | "candidate_only" | "neither"
+    evidence: list | None = None  # exemplar items that most activate this feature/concept
+    source: str | None = None  # name provenance: manual | payload | keyword | ai | text
 
     @property
     def label(self) -> str:
-        return self.name or self.id
+        base = self.name or self.id
+        return f"{base} (AI-proposed)" if self.source == "ai" else base
 
     @classmethod
     def from_dict(cls, d: dict) -> "Contribution":
@@ -24,6 +27,8 @@ class Contribution:
             value=float(d["value"]),
             confidence=d.get("confidence"),
             polarity=d.get("polarity", "shared"),
+            evidence=d.get("evidence"),
+            source=d.get("source"),
         )
 
 
@@ -83,6 +88,8 @@ class Attribution:
                     "value": c.value,
                     "confidence": c.confidence,
                     "polarity": c.polarity,
+                    "evidence": c.evidence,
+                    "source": c.source,
                 }
                 for c in self.contributions
             ],

@@ -37,12 +37,27 @@ def build_bundle(
     items: list | None = None,
     modality: str = "text",
     min_confidence: float = 0.3,
+    n_exemplars: int = 5,
+    label_source: str = "payload",
 ) -> Bundle:
-    """Assemble a Bundle from a trained SAE + auto-named features."""
+    """Assemble a Bundle from a trained SAE + auto-named features + exemplar evidence."""
     X = np.asarray(corpus_vectors, dtype=np.float64)
     H = sae.encode(X)
     label_arrays = _resolve_labels(labelers, items, X.shape[0])
     names, conf = label_features(H, label_arrays, min_confidence=min_confidence)
+    source = [label_source if nm is not None else None for nm in names]
+
+    # Evidence: the corpus items that most activate each *named* feature (§13.11).
+    exemplars: dict = {}
+    for f, name in enumerate(names):
+        if name is None:
+            continue
+        col = H[:, f]
+        top = np.argsort(col)[::-1][:n_exemplars]
+        top = [int(i) for i in top if col[i] > 0]
+        if top:
+            exemplars[str(f)] = [items[i] if items is not None else int(i) for i in top]
+
     return Bundle(
         embedder=embedder,
         dim=sae.dim,
@@ -50,9 +65,12 @@ def build_bundle(
         modality=modality,
         w_enc=np.asarray(sae.W_enc, dtype=np.float32),
         b_enc=np.asarray(sae.b_enc, dtype=np.float32),
-        dec_norm2=np.asarray(sae.dec_norm2(), dtype=np.float32),
+        w_dec=np.ascontiguousarray(sae.W_dec.T, dtype=np.float32),  # [n_features, dim]
+        b_dec=np.asarray(sae.b_dec, dtype=np.float32),
         feature_names=names,
         feature_conf=conf,
+        feature_source=source,
+        feature_exemplars=exemplars,
     )
 
 
@@ -62,11 +80,13 @@ def import_sae(
     w_enc: np.ndarray,
     b_enc: np.ndarray,
     w_dec: np.ndarray,
+    b_dec: np.ndarray | None = None,
     modality: str = "text",
 ) -> Bundle:
     """Wrap an externally trained SAE (e.g. from SAELens/HF) into a Bundle.
 
-    w_enc: [n_features, dim]; b_enc: [n_features]; w_dec: [dim, n_features].
+    w_enc: [n_features, dim]; b_enc: [n_features]; w_dec: [dim, n_features];
+    b_dec: [dim] (defaults to zeros).
     """
     w_enc = np.asarray(w_enc, dtype=np.float32)
     w_dec = np.asarray(w_dec, dtype=np.float32)
@@ -78,5 +98,6 @@ def import_sae(
         modality=modality,
         w_enc=w_enc,
         b_enc=np.asarray(b_enc, dtype=np.float32),
-        dec_norm2=(w_dec ** 2).sum(axis=0).astype(np.float32),
+        w_dec=np.ascontiguousarray(w_dec.T, dtype=np.float32),  # -> [n_features, dim]
+        b_dec=np.zeros(dim, np.float32) if b_dec is None else np.asarray(b_dec, np.float32),
     )
