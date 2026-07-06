@@ -23,6 +23,12 @@ dist/
 *.safetensors
 *.simlens/
 
+# Secrets / local env (never commit credentials — compose reads these from the environment)
+.env
+.env.*
+*.pem
+*.key
+
 # OS / editor
 .DS_Store
 .idea/

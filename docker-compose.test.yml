@@ -1,0 +1,22 @@
+# Local services for the live-adapter integration tests (tests/test_live_adapters.py).
+# Credentials are read from the environment — set them first (the `:?` form makes compose
+# fail loudly if they are unset, so nothing sensitive is ever hardcoded here):
+#   export SIMLENS_PG_USER=... SIMLENS_PG_PASSWORD=... SIMLENS_PG_DB=...
+#   docker compose -f docker-compose.test.yml up -d
+#   pytest tests/test_live_adapters.py -v
+#   docker compose -f docker-compose.test.yml down
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: ${SIMLENS_PG_PASSWORD:?set SIMLENS_PG_PASSWORD in your environment}
+      POSTGRES_USER: ${SIMLENS_PG_USER:?set SIMLENS_PG_USER in your environment}
+      POSTGRES_DB: ${SIMLENS_PG_DB:?set SIMLENS_PG_DB in your environment}
+    ports:
+      - "5432:5432"
