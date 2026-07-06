@@ -21,8 +21,22 @@ classifiers = [
 dependencies = ["numpy>=1.21"]
 
 [project.optional-dependencies]
+# vector-store adapters
+qdrant = ["qdrant-client"]
+pgvector = ["psycopg[binary]>=3"]
+faiss = ["faiss-cpu"]
+weaviate = ["weaviate-client"]
+# LLM feature-naming providers (pick one)
+openai = ["openai>=1"]
+gemini = ["google-generativeai"]
+llm = ["openai>=1"]
+# convenience bundles
+all = ["qdrant-client", "openai>=1"]
 serve = []
 dev = ["pytest>=7", "maturin>=1.7"]
+
+[project.scripts]
+simlens = "simlens.cli:main"
 
 [project.urls]
 Repository = "https://github.com/ghassenov/simlens"

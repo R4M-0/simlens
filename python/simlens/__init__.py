@@ -13,23 +13,29 @@ Quick start (zero setup, exact Level-1)::
 """
 from __future__ import annotations
 
-from . import adapters, eval, train, viz
+from . import adapters, eval, integrations, naming, train, viz
 from ._native import score
+from .autofit import autofit
 from .bundle import Bundle
 from .explain import Explainer
+from .multivector import MultiVectorExplainer
 from .types import Attribution, Contribution
 
 __version__ = "0.1.0"
 
 __all__ = [
     "Explainer",
+    "MultiVectorExplainer",
     "Bundle",
     "Attribution",
     "Contribution",
+    "autofit",
     "score",
     "train",
     "eval",
     "adapters",
+    "integrations",
+    "naming",
     "viz",
     "__version__",
 ]
