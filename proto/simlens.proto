@@ -1,0 +1,75 @@
+// SimLens serving contract. The HTTP sidecar (python/simlens/serve.py) is a 1:1 JSON
+// transcoding of these messages; a native gRPC `simlens-serve` is on the roadmap.
+syntax = "proto3";
+
+package simlens.v1;
+
+message Vector {
+  repeated float values = 1;
+}
+
+message Contribution {
+  string id = 1;            // "dim:412" | "feat:2317" | "concept:relevant"
+  string name = 2;          // human label, if known
+  double value = 3;         // signed contribution to the score
+  double confidence = 4;    // naming confidence in [0,1] (0 if unknown)
+  string polarity = 5;      // shared | query_only | candidate_only | neither
+  repeated string evidence = 6; // exemplar items for this feature/concept
+}
+
+message Attribution {
+  double score = 1;
+  string metric = 2;
+  string level = 3;                       // dim | feature | concept | aspect
+  repeated Contribution contributions = 4;
+  double completeness_residual = 5;       // |score - Σ value|
+  double coverage = 6;
+  string bundle_hash = 7;
+  repeated string warnings = 8;
+}
+
+message ExplainRequest {
+  repeated float query = 1;
+  repeated Vector candidates = 2;         // OR candidate_ids + adapter fetch
+  repeated string candidate_ids = 3;
+  string level = 4;
+  uint32 top_k = 5;
+  string bundle = 6;
+}
+
+message MarginRequest {
+  repeated float query = 1;
+  repeated float better = 2;
+  repeated float worse = 3;
+  string level = 4;
+  uint32 top_k = 5;
+}
+
+message SteerRequest {
+  repeated float query = 1;
+  map<string, double> weights = 2;        // concept name -> delta
+}
+
+message ExplainResponse {
+  string bundle_hash = 1;
+  repeated Attribution results = 2;
+}
+
+message Manifest {
+  string embedder = 1;
+  uint32 dim = 2;
+  string metric = 3;
+  uint32 n_features = 4;
+  uint32 concepts = 5;
+  string content_hash = 6;
+  string signature = 7;
+}
+
+message BundleRef { string bundle = 1; }
+
+service SimLens {
+  rpc Explain       (ExplainRequest) returns (ExplainResponse);
+  rpc ExplainMargin (MarginRequest)  returns (ExplainResponse);
+  rpc Steer         (SteerRequest)   returns (Vector);
+  rpc BundleInfo    (BundleRef)      returns (Manifest);
+}

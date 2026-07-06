@@ -1,7 +1,9 @@
-"""Terminal-friendly rendering of an Attribution (no external deps)."""
+"""Terminal-friendly rendering of an Attribution + token heatmaps (no external deps)."""
 from __future__ import annotations
 
 from ..types import Attribution
+
+_BLOCKS = " ▁▂▃▄▅▆▇█"
 
 
 def render(attr: Attribution, width: int = 28) -> str:
@@ -24,4 +26,27 @@ def render(attr: Attribution, width: int = 28) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["render"]
+def highlight(tokens: list, scores: list, mode: str = "blocks") -> str:
+    """Render a per-token importance heatmap.
+
+    mode="blocks": inline unicode intensity under each token (terminal-safe).
+    mode="html":   <span> with background opacity keyed to score (for notebooks).
+    """
+    scores = list(scores)
+    peak = max((abs(s) for s in scores), default=0.0) or 1.0
+    if mode == "html":
+        spans = []
+        for tok, s in zip(tokens, scores):
+            a = min(1.0, abs(s) / peak)
+            color = f"rgba(79,70,229,{a:.2f})"  # indigo, opacity = importance
+            spans.append(f'<span style="background:{color};padding:1px 3px">{tok}</span>')
+        return " ".join(spans)
+    # blocks
+    cells = []
+    for tok, s in zip(tokens, scores):
+        idx = int(round((abs(s) / peak) * (len(_BLOCKS) - 1)))
+        cells.append(f"{tok}{_BLOCKS[idx]}")
+    return " ".join(cells)
+
+
+__all__ = ["render", "highlight"]
