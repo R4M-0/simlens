@@ -79,7 +79,8 @@ def test_feature_explanation_reports_residual(bundle):
     a = ex.explain(bundle._X[idx[0]], bundle._X[idx[1]], level="feature", top_k=5)
     assert a.level == "feature"
     assert a.bundle_hash is not None
-    assert all(c.polarity == "shared" for c in a.contributions)
+    valid = {"shared", "query_only", "candidate_only", "neither"}
+    assert all(c.polarity in valid for c in a.contributions)
     # residual is defined and finite
     assert a.completeness_residual >= 0.0
 

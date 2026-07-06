@@ -41,6 +41,15 @@ print(attr.as_sentence())
 # → "Matched mainly on 'financial-regulation' (61%), '2024-filings' (22%)."
 ```
 
+…or skip the manual setup entirely — point `autofit` at your vector store and it samples
+vectors, trains the dictionary, and **names features from your payload fields + an
+optional LLM**, all in one line:
+
+```python
+bundle = simlens.autofit(store)                       # zero manual labeling
+# or: simlens.autofit(store, namer=simlens.naming.from_provider("openai"))
+```
+
 New here? **[docs/how-simlens-works.md](./docs/how-simlens-works.md)** is a friendly,
 plain-language tour of everything below.
 
@@ -66,12 +75,33 @@ plain-language tour of everything below.
 |-----------|------|
 | Explain a match (dims / features / concepts / aspects) | `ex.explain(q, c, level=...)` |
 | Explain a **ranking** — why A beat B | `ex.explain_margin(q, better, worse)` |
+| Why they're **not** more similar | `ex.explain_dissimilarity(q, c)` |
 | Minimal reason — what breaks the match | `ex.ablate(q, c, threshold=...)` |
 | Steer a query in concept space | `ex.steer(q, {"topic": -1.0})` |
 | Contrast against a background set | `ex.explain_vs_corpus(q, c, foil)` |
 | Summarize a whole result page | `ex.summarize(q, hits)` |
-| Train &amp; package a concept bundle | `simlens.train.build_bundle(...)` |
+| Late-interaction (multi-vector) attribution | `simlens.MultiVectorExplainer().explain(Q, C)` |
+| **Auto-build a bundle from your store** (no manual labeling) | `simlens.autofit(store)` |
+| Train &amp; package a concept bundle manually | `simlens.train.build_bundle(...)` |
+| Calibrate / audit naming confidence | `simlens.eval.reliability(bundle, X, labelers)` |
+| Fetch candidates from your store | `simlens.adapters.Qdrant / Pgvector / Faiss / Weaviate` |
+| Inspect, verify, evaluate from the shell | `simlens info \| verify \| eval \| serve` |
 | Serve over HTTP | `python -m simlens.serve --bundle b.simlens` |
+
+## System extensions
+
+Thin, customizable wrappers that adapt SimLens to a system type — you bring the vectors,
+they bring the explanation. Business-logic-agnostic and configurable.
+
+```python
+from simlens.integrations.rag   import RagExplainer          # why retrieved / why ranked
+from simlens.integrations.recsys import RecsysExplainer       # "because you liked …", steer
+from simlens.integrations.kg    import KnowledgeGraphExplainer # explain / propose / type edges
+from simlens.integrations.audit import AuditLog               # signed, hashed decision records
+```
+
+Optional extras (same package): `pip install "simlens[qdrant,openai]"` — stores
+(`qdrant`, `pgvector`, `faiss`, `weaviate`) and LLM naming providers (`openai`, `gemini`).
 
 ## Install / build from source
 

@@ -88,6 +88,26 @@ def main():
                 print(f"    {lvl:8} residual_mean={r['residual_mean']:.4f} "
                       f"rel={r['relative_residual_mean']:.3f} coverage={r['coverage_mean']:.0%}")
 
+        print("\n== 11. why NOT more similar? (dissimilarity) ==")
+        c_other = X[np.where(~membership[:, 2])[0][0]]
+        dis = ex.explain_dissimilarity(q, c_other, top_k=4)
+        print("   ", ", ".join(f"{d.label}[{d.polarity}]" for d in dis.contributions))
+
+        print("\n== 12. confidence calibration ==")
+        rep = simlens.eval.reliability(reloaded, X, labelers)
+        print(f"    {rep['n_named']} named features, "
+              f"calibration_error={rep['calibration_error']}")
+
+    print("\n== 13. late-interaction (multi-vector) attribution ==")
+    rng = np.random.default_rng(7)
+    Cq = rng.standard_normal((5, 32))
+    Cc = np.vstack([Cq[1], rng.standard_normal((4, 32))])  # candidate shares one token
+    mv = simlens.MultiVectorExplainer("cosine").explain(
+        Cq, Cc, query_labels=[f"q{i}" for i in range(5)], candidate_labels=[f"c{j}" for j in range(5)]
+    )
+    print(f"    score={mv.score:.3f} residual={mv.completeness_residual:.1e}")
+    print("   ", mv.as_sentence())
+
 
 if __name__ == "__main__":
     main()
