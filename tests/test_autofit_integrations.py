@@ -111,6 +111,20 @@ def test_kg_explain_edge_and_propose(bundle, store_and_labels):
     assert all("type" in e and "source" in e for e in edges)
 
 
+def test_kg_propose_edges_knn_matches_exhaustive(bundle, store_and_labels):
+    _, X, _, _ = store_and_labels
+    kg = KnowledgeGraphExplainer(bundle)
+    nodes = {f"n{i}": X[i] for i in range(12)}
+    exhaustive = kg.propose_edges(nodes, threshold=0.5)
+    knn = kg.propose_edges_knn(nodes, k=11, threshold=0.5)  # k=n-1 → same candidate set
+    ex_pairs = {(e["source"], e["target"]) for e in exhaustive}
+    knn_pairs = {(e["source"], e["target"]) for e in knn}
+    assert ex_pairs == knn_pairs  # full-k kNN recovers the exhaustive edge set
+    # edges are de-duplicated and typed
+    assert len(knn_pairs) == len(knn)
+    assert all("type" in e for e in knn)
+
+
 def test_kg_concept_layer(bundle, store_and_labels):
     _, X, _, _ = store_and_labels
     kg = KnowledgeGraphExplainer(bundle)
