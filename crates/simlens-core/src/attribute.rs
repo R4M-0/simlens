@@ -274,13 +274,7 @@ pub struct Ablation {
 }
 
 /// Greedy minimal set of shared features whose removal drops the score below `threshold`.
-pub fn ablate(
-    sae: &Sae,
-    q: &[f32],
-    c: &[f32],
-    metric: Metric,
-    threshold: f64,
-) -> Ablation {
+pub fn ablate(sae: &Sae, q: &[f32], c: &[f32], metric: Metric, threshold: f64) -> Ablation {
     let (qe, ce) = effective(q, c, metric);
     let aq = sae.encode(&qe);
     let ac = sae.encode(&ce);

@@ -5,7 +5,13 @@
 //! levels — dimensions (exact), SAE features, and named concepts — each carrying a
 //! completeness residual so consumers can see exactly how faithful the explanation is.
 
+// Numeric kernels use explicit index loops over parallel slices for clarity and to keep the
+// f32/f64 mixed-precision arithmetic obvious; the iterator rewrite would obscure that.
+#![allow(clippy::needless_range_loop)]
+
 pub mod attribute;
+#[cfg(feature = "bundle")]
+pub mod bundle;
 pub mod cav;
 pub mod linalg;
 pub mod sae;
@@ -36,7 +42,11 @@ mod tests {
         let a = explain_l1(&q, &c, Metric::Dot, &cfg());
         assert!((a.score - (0.5 - 2.0 + 6.0)).abs() < 1e-6);
         // completeness: Σφ == score
-        assert!(a.completeness_residual < 1e-9, "residual {}", a.completeness_residual);
+        assert!(
+            a.completeness_residual < 1e-9,
+            "residual {}",
+            a.completeness_residual
+        );
         let sum: f64 = a.contributions.iter().map(|x| x.value).sum();
         assert!((sum - a.score).abs() < 1e-9);
     }
@@ -98,6 +108,29 @@ mod tests {
         // residual == reconstruction error: the raw dot is 7 (dim2 isn't reconstructed
         // because feature 1 is suppressed) → the honest residual is exactly 1.0
         assert!((attr.completeness_residual - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn topk_gate_keeps_only_k_largest() {
+        // 3 features on dim 3, identity encoder; input activates all three at 3,2,1.
+        let w_enc = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let b_enc = vec![0.0f32; 3];
+        let w_dec = vec![1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let b_dec = vec![0.0f32; 3];
+        let sae = Sae::new(3, 3, w_enc, b_enc, w_dec, b_dec).with_gates(2, Vec::new());
+        let a = sae.encode(&[3.0, 2.0, 1.0]);
+        assert_eq!(a, vec![3.0, 2.0, 0.0]); // smallest (feature 2) gated off
+    }
+
+    #[test]
+    fn jumprelu_threshold_gates_below() {
+        let w_enc = vec![1.0, 0.0, 0.0, 1.0];
+        let b_enc = vec![0.0f32; 2];
+        let w_dec = vec![1.0f32, 0.0, 0.0, 1.0];
+        let b_dec = vec![0.0f32; 2];
+        let sae = Sae::new(2, 2, w_enc, b_enc, w_dec, b_dec).with_gates(0, vec![1.5, 1.5]);
+        let a = sae.encode(&[3.0, 1.0]); // f0=3>1.5 kept, f1=1<1.5 gated
+        assert_eq!(a, vec![3.0, 0.0]);
     }
 
     #[test]

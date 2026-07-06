@@ -11,3 +11,19 @@ name = "simlens_core"
 path = "src/lib.rs"
 
 [dependencies]
+# `bundle` gates the Rust bundle loader (safetensors + serde_json) so the default kernel
+# crate stays dependency-free. It's the piece that unblocks native Rust serving.
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+safetensors = { version = "0.4", optional = true }
+
+[features]
+default = []
+bundle = ["dep:serde", "dep:serde_json", "dep:safetensors"]
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "attribution"
+harness = false
