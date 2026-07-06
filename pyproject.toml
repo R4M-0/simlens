@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "simlens"
-version = "0.1.0"
+version = "0.2.0"
 description = "Faithful, vector-only similarity & ranking attribution — the 'why' vector search never returns."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -30,16 +30,25 @@ weaviate = ["weaviate-client"]
 openai = ["openai>=1"]
 gemini = ["google-generativeai"]
 llm = ["openai>=1"]
+# research-scale SAE training (GPU) + importing external dictionaries
+train = ["torch>=2", "safetensors>=0.4"]
+# sublinear kNN candidate generation for the knowledge-graph extension
+kg = ["hnswlib>=0.7"]
 # convenience bundles
 all = ["qdrant-client", "openai>=1"]
 serve = []
-dev = ["pytest>=7", "maturin>=1.7"]
+dev = ["pytest>=7", "maturin>=1.7", "hypothesis>=6"]
 
 [project.scripts]
 simlens = "simlens.cli:main"
 
 [project.urls]
 Repository = "https://github.com/ghassenov/simlens"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: live external-service tests (Qdrant/pgvector), skipped when absent",
+]
 
 [tool.maturin]
 manifest-path = "crates/simlens-py/Cargo.toml"

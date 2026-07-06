@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-4f46e5"></a>
   <img alt="Core: Rust" src="https://img.shields.io/badge/core-Rust-4f46e5">
   <img alt="Python 3.8+" src="https://img.shields.io/badge/python-3.8%2B-4f46e5">
-  <img alt="Status: v0.1" src="https://img.shields.io/badge/status-v0.1-22c55e">
+  <img alt="Status: v0.2" src="https://img.shields.io/badge/status-v0.2-22c55e">
 </p>
 
 ---
@@ -75,10 +75,13 @@ plain-language tour of everything below.
 |-----------|------|
 | Explain a match (dims / features / concepts / aspects) | `ex.explain(q, c, level=...)` |
 | Explain a **ranking** — why A beat B | `ex.explain_margin(q, better, worse)` |
+| **Centered "why"** — discriminative, past the anisotropy baseline | `ex.explain(q, c, center=True)` |
+| **Any learned metric** (cross-encoder, reranker) via Integrated Gradients | `simlens.LearnedMetricExplainer(scorer).explain(q, c)` |
 | Why they're **not** more similar | `ex.explain_dissimilarity(q, c)` |
 | Minimal reason — what breaks the match | `ex.ablate(q, c, threshold=...)` |
 | Steer a query in concept space | `ex.steer(q, {"topic": -1.0})` |
 | Contrast against a background set | `ex.explain_vs_corpus(q, c, foil)` |
+| **Certify** a bundle's faithfulness (signed scorecard) | `bundle.certify(vectors)` |
 | Summarize a whole result page | `ex.summarize(q, hits)` |
 | Late-interaction (multi-vector) attribution | `simlens.MultiVectorExplainer().explain(Q, C)` |
 | **Auto-build a bundle from your store** (no manual labeling) | `simlens.autofit(store)` |
@@ -100,8 +103,10 @@ from simlens.integrations.kg    import KnowledgeGraphExplainer # explain / propo
 from simlens.integrations.audit import AuditLog               # signed, hashed decision records
 ```
 
-Optional extras (same package): `pip install "simlens[qdrant,openai]"` — stores
-(`qdrant`, `pgvector`, `faiss`, `weaviate`) and LLM naming providers (`openai`, `gemini`).
+Optional extras (same package): `pip install "simlens[qdrant,openai,train]"` — stores
+(`qdrant`, `pgvector`, `faiss`, `weaviate`), LLM naming providers (`openai`, `gemini`),
+research-scale GPU training + safetensors import (`train`), and sublinear kNN edge
+proposal (`kg`).
 
 ## Install / build from source
 
@@ -126,15 +131,29 @@ python examples/quickstart.py  # full end-to-end demo
 
 ## Status
 
-**v0.1 — a working, tested MVP.** Level-1/2/3 attribution, margin, ablation, steering,
-contrastive-corpus and aspect views, a dependency-light numpy SAE trainer, CAV fitting,
-faithfulness evaluation, store adapters, and a serving sidecar — Rust core and Python
-suites green. A native Rust `simlens-serve`, zero-copy numpy, and late-interaction
-(multi-vector) attribution are on the roadmap.
+**v0.2 — trustworthy defaults, measured not asserted.** Everything in v0.1 plus:
+
+- **Real SAE trainers** — TopK (default), BatchTopK, JumpReLU with AuxK dead-feature revival,
+  a zero-dep numpy backend and an optional `torch`/GPU backend; the training-time sparsity
+  gate is reproduced at inference (train == inference), and safetensors/SAELens dictionaries
+  drop in via `import_safetensors_sae`.
+- **Detection-scored naming** — names carry a *measured* balanced-accuracy (name-as-classifier),
+  and low-scoring names are dropped instead of shown as confident nonsense.
+- **Centered "why"** — anisotropy correction (mean / ABTT / whitening) surfaces discriminative
+  concepts past the global-mean baseline; the default for the integrations.
+- **Integrated Gradients** — explain any learned/non-linear scorer with a completeness axiom.
+- **Faithfulness certification** — a signed quality scorecard (FVU, L0, dead %, deletion/
+  insertion AUC, detection accuracies) baked into the bundle and covered by its content hash.
+- **Zero-copy numpy FFI**, **criterion + Python benchmarks** ([docs/benchmarks.md](./docs/benchmarks.md)),
+  **CI + abi3 wheels + PyPI/crates.io publishing**, property-based & adversarial tests, and
+  per-extension **[real-system validation](./docs/validation.md)**.
+
+Frontier (post-v0.2): a native Rust `simlens-serve`, cross-modal and hierarchical concepts.
 
 ## Documentation
 
 - **[How SimLens works](./docs/how-simlens-works.md)** — the concepts, end to end.
+- **[Benchmarks](./docs/benchmarks.md)** · **[Real-system validation](./docs/validation.md)**.
 - **[LICENSE](./LICENSE)** — Apache-2.0.
 
 ## License
