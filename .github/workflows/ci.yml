@@ -69,31 +69,5 @@ jobs:
       - name: perf harness smoke
         run: python benchmarks/bench.py --json --iters 200 --dims 384
 
-  wheels:
-    name: wheels (${{ matrix.platform.target }})
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - { runner: ubuntu-latest, target: x86_64 }
-          - { runner: ubuntu-latest, target: aarch64 }
-          - { runner: macos-latest, target: aarch64 }
-          - { runner: macos-13, target: x86_64 }
-          - { runner: windows-latest, target: x64 }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: build abi3 wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist --manifest-path crates/simlens-py/Cargo.toml
-          sccache: "true"
-          manylinux: auto
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheels-${{ matrix.platform.runner }}-${{ matrix.platform.target }}
-          path: dist
+# Wheels are built on tagged releases (.github/workflows/release.yml), not on every push —
+# no need to burn the constrained macOS runner pool per-commit.
