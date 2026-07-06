@@ -146,7 +146,12 @@ pub fn explain_l1(q: &[f32], c: &[f32], metric: Metric, cfg: &ExplainConfig) -> 
     finalize(raws, score, metric, Level::Dim, cfg)
 }
 
-/// Level 2 — shared SAE feature attribution.
+/// Level 2 — SAE feature attribution.
+///
+/// Exact decomposition of the reconstruction dot product:
+/// `dot(recon_q, recon_c) = Σ_f a_q[f]·(d_f · recon_c) + (b_dec · recon_c)`.
+/// The completeness residual therefore reflects only SAE *reconstruction* error, not a
+/// diagonal approximation.
 pub fn explain_l2(
     sae: &Sae,
     q: &[f32],
@@ -157,12 +162,14 @@ pub fn explain_l2(
     let (qe, ce) = effective(q, c, metric);
     let aq = sae.encode(&qe);
     let ac = sae.encode(&ce);
+    let recon_c = sae.recon(&ac);
+
     let mut raws = Vec::new();
     for f in 0..sae.n_features {
-        let value = aq[f] * ac[f] * sae.dec_norm2[f];
-        if value == 0.0 {
-            continue; // only features active in *both* drive the reconstruction dot
+        if aq[f] == 0.0 {
+            continue; // inactive query features contribute nothing to recon_q·recon_c
         }
+        let value = aq[f] * linalg::dot_f32_f64(sae.dec_row(f), &recon_c);
         raws.push(Raw {
             id: format!("feat:{f}"),
             name: sae.names[f].clone(),
@@ -171,8 +178,31 @@ pub fn explain_l2(
             polarity: Polarity::from_activity(aq[f] > 0.0, ac[f] > 0.0),
         });
     }
+    // decoder-bias term, so Σφ == dot(recon_q, recon_c) exactly
+    let bias = linalg::dot_f32_f64(&sae.b_dec, &recon_c);
+    if bias != 0.0 {
+        raws.push(Raw {
+            id: "feat:bias".to_string(),
+            name: Some("(bias / global mean)".to_string()),
+            value: bias,
+            confidence: None,
+            polarity: Polarity::Neither,
+        });
+    }
+    let total_abs: f64 = raws.iter().map(|r| r.value.abs()).sum();
     let score = raw_score(q, c, metric);
-    finalize(raws, score, metric, Level::Feature, cfg)
+    let mut attr = finalize(raws, score, metric, Level::Feature, cfg);
+    // Embedding spaces are anisotropic: a large shared mean can dominate every score.
+    // When it does, the raw decomposition is faithful but uninformative — steer the user
+    // to the contrastive view, which subtracts that baseline.
+    if total_abs > 0.0 && bias.abs() > 0.5 * total_abs {
+        attr.warnings.push(
+            "anisotropy: the shared global-mean baseline dominates this score; use a \
+             contrastive explanation (explain_vs_corpus) to surface discriminative features"
+                .to_string(),
+        );
+    }
+    attr
 }
 
 /// Level 3 — named-concept (CAV) attribution. Partial by construction.
@@ -189,12 +219,15 @@ pub fn explain_l3(
         let pq = cavs.project(&qe, k);
         let pc = cavs.project(&ce, k);
         let value = pq * pc;
+        // Sign-based polarity: "shared" means *both* exhibit the concept (both projections
+        // positive). Two items that both *lack* a concept (both negative) also yield a
+        // positive product, but that is not a shared concept — mark it Neither.
         raws.push(Raw {
             id: format!("concept:{}", cavs.names[k]),
             name: Some(cavs.names[k].clone()),
             value,
             confidence: Some(cavs.conf[k]),
-            polarity: Polarity::from_activity(pq.abs() > 1e-9, pc.abs() > 1e-9),
+            polarity: Polarity::from_activity(pq > 0.0, pc > 0.0),
         });
     }
     let score = raw_score(q, c, metric);
@@ -251,8 +284,10 @@ pub fn ablate(
     let (qe, ce) = effective(q, c, metric);
     let aq = sae.encode(&qe);
     let ac = sae.encode(&ce);
+    let recon_c = sae.recon(&ac);
     let mut feats: Vec<(usize, f64)> = (0..sae.n_features)
-        .map(|f| (f, aq[f] * ac[f] * sae.dec_norm2[f]))
+        .filter(|&f| aq[f] > 0.0)
+        .map(|f| (f, aq[f] * linalg::dot_f32_f64(sae.dec_row(f), &recon_c)))
         .filter(|(_, v)| *v > 0.0)
         .collect();
     feats.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());

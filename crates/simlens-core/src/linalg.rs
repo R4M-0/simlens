@@ -11,6 +11,12 @@ pub fn dot64(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
+/// Mixed-precision dot of an f32 slice with an f64 slice.
+#[inline]
+pub fn dot_f32_f64(a: &[f32], b: &[f64]) -> f64 {
+    a.iter().zip(b).map(|(x, y)| *x as f64 * y).sum()
+}
+
 #[inline]
 pub fn norm(a: &[f32]) -> f64 {
     dot(a, a).sqrt()

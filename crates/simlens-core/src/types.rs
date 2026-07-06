@@ -99,7 +99,6 @@ pub struct ExplainConfig {
     pub level: Level,
     pub top_k: usize,
     pub min_abs: f64,
-    pub include_polarity: bool,
 }
 
 impl Default for ExplainConfig {
@@ -108,7 +107,6 @@ impl Default for ExplainConfig {
             level: Level::Dim,
             top_k: 8,
             min_abs: 0.0,
-            include_polarity: true,
         }
     }
 }

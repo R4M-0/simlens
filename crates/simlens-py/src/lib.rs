@@ -21,12 +21,11 @@ fn metric(s: &str) -> PyResult<Metric> {
         .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("unknown metric '{s}'")))
 }
 
-fn cfg(top_k: usize, min_abs: f64, include_polarity: bool) -> ExplainConfig {
+fn cfg(top_k: usize, min_abs: f64) -> ExplainConfig {
     ExplainConfig {
         level: sc::Level::Dim,
         top_k,
         min_abs,
-        include_polarity,
     }
 }
 
@@ -59,7 +58,7 @@ fn score(q: Vec<f32>, c: Vec<f32>, metric_s: &str) -> PyResult<f64> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (q, c, metric_s, top_k=8, min_abs=0.0, include_polarity=true))]
+#[pyo3(signature = (q, c, metric_s, top_k=8, min_abs=0.0))]
 fn explain_l1(
     py: Python<'_>,
     q: Vec<f32>,
@@ -67,9 +66,8 @@ fn explain_l1(
     metric_s: &str,
     top_k: usize,
     min_abs: f64,
-    include_polarity: bool,
 ) -> PyResult<PyObject> {
-    let a = sc::explain_l1(&q, &c, metric(metric_s)?, &cfg(top_k, min_abs, include_polarity));
+    let a = sc::explain_l1(&q, &c, metric(metric_s)?, &cfg(top_k, min_abs));
     attr_to_py(py, &a)
 }
 
@@ -84,7 +82,7 @@ fn explain_margin(
     top_k: usize,
     min_abs: f64,
 ) -> PyResult<PyObject> {
-    let a = sc::explain_margin_l1(&q, &better, &worse, metric(metric_s)?, &cfg(top_k, min_abs, true));
+    let a = sc::explain_margin_l1(&q, &better, &worse, metric(metric_s)?, &cfg(top_k, min_abs));
     attr_to_py(py, &a)
 }
 
@@ -96,10 +94,23 @@ struct PySae {
 #[pymethods]
 impl PySae {
     #[new]
-    fn new(dim: usize, n_features: usize, w_enc: Vec<u8>, b_enc: Vec<u8>, dec_norm2: Vec<u8>) -> Self {
-        let dn: Vec<f64> = f32s(&dec_norm2).into_iter().map(|x| x as f64).collect();
+    fn new(
+        dim: usize,
+        n_features: usize,
+        w_enc: Vec<u8>,
+        b_enc: Vec<u8>,
+        w_dec: Vec<u8>,
+        b_dec: Vec<u8>,
+    ) -> Self {
         PySae {
-            inner: Sae::new(dim, n_features, f32s(&w_enc), f32s(&b_enc), dn),
+            inner: Sae::new(
+                dim,
+                n_features,
+                f32s(&w_enc),
+                f32s(&b_enc),
+                f32s(&w_dec),
+                f32s(&b_dec),
+            ),
         }
     }
 
@@ -108,7 +119,17 @@ impl PySae {
         self.inner.conf = conf;
     }
 
-    #[pyo3(signature = (q, c, metric_s, top_k=8, min_abs=0.0, include_polarity=true))]
+    /// Sparse feature activations for a single vector: `relu(W_enc·x + b_enc)`.
+    fn encode(&self, x: Vec<f32>) -> Vec<f64> {
+        self.inner.encode(&x)
+    }
+
+    #[getter]
+    fn dec_norm2(&self) -> Vec<f64> {
+        self.inner.dec_norm2.clone()
+    }
+
+    #[pyo3(signature = (q, c, metric_s, top_k=8, min_abs=0.0))]
     fn explain(
         &self,
         py: Python<'_>,
@@ -117,9 +138,8 @@ impl PySae {
         metric_s: &str,
         top_k: usize,
         min_abs: f64,
-        include_polarity: bool,
     ) -> PyResult<PyObject> {
-        let a = sc::explain_l2(&self.inner, &q, &c, metric(metric_s)?, &cfg(top_k, min_abs, include_polarity));
+        let a = sc::explain_l2(&self.inner, &q, &c, metric(metric_s)?, &cfg(top_k, min_abs));
         attr_to_py(py, &a)
     }
 
@@ -156,7 +176,7 @@ impl PyCavSet {
         }
     }
 
-    #[pyo3(signature = (q, c, metric_s, top_k=8, min_abs=0.0, include_polarity=true))]
+    #[pyo3(signature = (q, c, metric_s, top_k=8, min_abs=0.0))]
     fn explain(
         &self,
         py: Python<'_>,
@@ -165,9 +185,8 @@ impl PyCavSet {
         metric_s: &str,
         top_k: usize,
         min_abs: f64,
-        include_polarity: bool,
     ) -> PyResult<PyObject> {
-        let a = sc::explain_l3(&self.inner, &q, &c, metric(metric_s)?, &cfg(top_k, min_abs, include_polarity));
+        let a = sc::explain_l3(&self.inner, &q, &c, metric(metric_s)?, &cfg(top_k, min_abs));
         attr_to_py(py, &a)
     }
 

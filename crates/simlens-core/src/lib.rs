@@ -78,8 +78,9 @@ mod tests {
             0.0, 0.0, 1.0, // f1
         ];
         let b_enc = vec![0.0f32, -10.0]; // f1 suppressed
-        let dec_norm2 = vec![1.0f64, 1.0];
-        let sae = Sae::new(3, 2, w_enc, b_enc, dec_norm2);
+        let w_dec = vec![1.0f32, 0.0, 0.0, 0.0, 0.0, 1.0]; // d0=[1,0,0], d1=[0,0,1]
+        let b_dec = vec![0.0f32, 0.0, 0.0];
+        let sae = Sae::new(3, 2, w_enc, b_enc, w_dec, b_dec);
         let a = sae.encode(&[2.0, 0.0, 5.0]);
         assert_eq!(a[0], 2.0);
         assert_eq!(a[1], 0.0); // 5 - 10 < 0 → relu 0
@@ -87,18 +88,25 @@ mod tests {
         let q = vec![2.0f32, 0.0, 1.0];
         let c = vec![3.0f32, 0.0, 1.0];
         let attr = explain_l2(&sae, &q, &c, Metric::Dot, &cfg());
-        // only feature 0 is active in both → one contribution = 2*3*1 = 6
+        // recon_c = 3·d0 = [3,0,0]; only feature 0 active in q → φ0 = 2·(d0·recon_c) = 6
         assert_eq!(attr.contributions.len(), 1);
         assert!((attr.contributions[0].value - 6.0).abs() < 1e-9);
         assert_eq!(attr.contributions[0].polarity, Polarity::Shared);
+        // Σφ == dot(recon_q, recon_c) == 6 exactly (the decomposition invariant)
+        let sum: f64 = attr.contributions.iter().map(|x| x.value).sum();
+        assert!((sum - 6.0).abs() < 1e-9);
+        // residual == reconstruction error: the raw dot is 7 (dim2 isn't reconstructed
+        // because feature 1 is suppressed) → the honest residual is exactly 1.0
+        assert!((attr.completeness_residual - 1.0).abs() < 1e-9);
     }
 
     #[test]
     fn ablation_drops_score() {
         let w_enc = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
         let b_enc = vec![0.0f32, 0.0];
-        let dec_norm2 = vec![1.0f64, 1.0];
-        let sae = Sae::new(3, 2, w_enc, b_enc, dec_norm2);
+        let w_dec = vec![1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0]; // d0=[1,0,0], d1=[0,1,0]
+        let b_dec = vec![0.0f32, 0.0, 0.0];
+        let sae = Sae::new(3, 2, w_enc, b_enc, w_dec, b_dec);
         let q = vec![1.0f32, 1.0, 0.0];
         let c = vec![1.0f32, 1.0, 0.0];
         let abl = ablate(&sae, &q, &c, Metric::Dot, 0.5);
