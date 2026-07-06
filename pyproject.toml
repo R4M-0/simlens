@@ -9,7 +9,7 @@ description = "Faithful, vector-only similarity & ranking attribution — the 'w
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "Apache-2.0" }
-authors = [{ name = "ghassenov" }]
+authors = [{ name = "Ghassen Naouar", email = "ghassennaouar7@gmail.com" }]
 keywords = ["embeddings", "interpretability", "vector-search", "explainability", "attribution", "sae"]
 classifiers = [
     "Programming Language :: Rust",
