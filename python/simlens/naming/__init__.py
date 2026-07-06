@@ -7,7 +7,26 @@ remain user-editable via `Bundle.rename_feature`.
 """
 from __future__ import annotations
 
+from .autointerp import (
+    ValidatedNamer,
+    decile_exemplars,
+    generate,
+    negative_exemplars,
+    score_detection,
+    score_fuzz,
+)
 from .keyword import KeywordNamer
 from .llm import LLMNamer, from_callable, from_provider
 
-__all__ = ["KeywordNamer", "LLMNamer", "from_callable", "from_provider"]
+__all__ = [
+    "KeywordNamer",
+    "LLMNamer",
+    "ValidatedNamer",
+    "from_callable",
+    "from_provider",
+    "generate",
+    "score_detection",
+    "score_fuzz",
+    "decile_exemplars",
+    "negative_exemplars",
+]

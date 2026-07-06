@@ -33,6 +33,8 @@ class Bundle:
     b_enc: np.ndarray | None = None            # [n_features]
     w_dec: np.ndarray | None = None            # [n_features, dim] (decoder atoms d_f)
     b_dec: np.ndarray | None = None            # [dim]
+    sae_k: int = 0                             # top-k sparsity gate (0 = plain ReLU)
+    sae_threshold: np.ndarray | None = None    # [n_features] JumpReLU gate (or None)
     feature_names: list[str | None] = field(default_factory=list)
     feature_conf: list[float | None] = field(default_factory=list)
     feature_source: list[str | None] = field(default_factory=list)  # payload|keyword|ai|manual
@@ -45,6 +47,13 @@ class Bundle:
     concept_source: list[str] = field(default_factory=list)  # examples | text
     concept_exemplars: dict = field(default_factory=dict)  # concept name -> [items]
     aspects: dict[str, str] = field(default_factory=dict)  # concept -> aspect bucket
+
+    # Anisotropy correction (T2.2) — the centered/whitened "why" view
+    mean: np.ndarray | None = None             # [dim] corpus centroid μ
+    whitening: np.ndarray | None = None        # [dim, dim] linear map (ABTT / whitening)
+
+    # Faithfulness certification (T2.3) — a signed quality scorecard
+    faithfulness: dict = field(default_factory=dict)
 
     content_hash: str | None = None
     signature: str | None = None
@@ -65,19 +74,34 @@ class Bundle:
     # ---- hashing / provenance -------------------------------------------------
     def compute_hash(self) -> str:
         chunks: list[bytes] = [self.embedder.encode(), str(self.dim).encode(), self.metric.encode()]
-        for arr in (self.w_enc, self.b_enc, self.w_dec, self.b_dec, self.concept_dirs):
+        for arr in (
+            self.w_enc, self.b_enc, self.w_dec, self.b_dec, self.concept_dirs,
+            self.sae_threshold, self.mean, self.whitening,
+        ):
             if arr is not None:
                 chunks.append(np.ascontiguousarray(arr, dtype=np.float32).tobytes())
+        chunks.append(str(int(self.sae_k)).encode())
         chunks.append(json.dumps(self.concept_names, sort_keys=True).encode())
+        chunks.append(json.dumps(self.faithfulness, sort_keys=True).encode())
         return _sha256(*chunks)
 
     def _manifest(self) -> dict:
+        sae = None
+        if self.has_sae:
+            gate = "relu"
+            if self.sae_threshold is not None:
+                gate = "jumprelu"
+            elif self.sae_k:
+                gate = "topk"
+            sae = {"n_features": self.n_features, "gate": gate, "k": int(self.sae_k)}
         return {
             "simlens_bundle_version": BUNDLE_VERSION,
             "embedder": {"id": self.embedder, "dim": self.dim, "modality": self.modality},
             "metric": self.metric,
-            "sae": None if not self.has_sae else {"n_features": self.n_features},
+            "sae": sae,
             "concepts": len(self.concept_names),
+            "centered": self.mean is not None,
+            "faithfulness": self.faithfulness or None,
             "content_hash": self.content_hash,
             "signature": self.signature,
         }
@@ -96,8 +120,14 @@ class Bundle:
                 w_dec=np.asarray(self.w_dec, dtype=np.float32),
                 b_dec=np.asarray(self.b_dec, dtype=np.float32),
             )
+            if self.sae_threshold is not None:
+                arrays["sae_threshold"] = np.asarray(self.sae_threshold, dtype=np.float32)
         if self.has_concepts:
             arrays["concept_dirs"] = np.asarray(self.concept_dirs, dtype=np.float32)
+        if self.mean is not None:
+            arrays["mean"] = np.asarray(self.mean, dtype=np.float32)
+        if self.whitening is not None:
+            arrays["whitening"] = np.asarray(self.whitening, dtype=np.float32)
         if arrays:
             np.savez(path / "weights.npz", **arrays)
 
@@ -125,6 +155,31 @@ class Bundle:
         )
         return self
 
+    def save_rust(self, path: str | Path) -> "Bundle":
+        """Also emit a Rust-loadable form (`manifest.json` + `weights.safetensors`) for the
+        native loader (`simlens_core::bundle`, feature `bundle`). Needs `safetensors`."""
+        try:
+            from safetensors.numpy import save_file
+        except ImportError as e:  # pragma: no cover
+            raise ImportError("save_rust needs safetensors; `pip install simlens[train]`") from e
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        self.content_hash = self.compute_hash()
+        tensors = {}
+        if self.has_sae:
+            tensors["w_enc"] = np.ascontiguousarray(self.w_enc, np.float32)
+            tensors["b_enc"] = np.ascontiguousarray(self.b_enc, np.float32)
+            tensors["w_dec"] = np.ascontiguousarray(self.w_dec, np.float32)
+            tensors["b_dec"] = np.ascontiguousarray(self.b_dec, np.float32)
+            if self.sae_threshold is not None:
+                tensors["sae_threshold"] = np.ascontiguousarray(self.sae_threshold, np.float32)
+        if self.has_concepts:
+            tensors["concept_dirs"] = np.ascontiguousarray(self.concept_dirs, np.float32)
+        if tensors:
+            save_file(tensors, str(path / "weights.safetensors"))
+        (path / "manifest.json").write_text(json.dumps(self._manifest(), indent=2))
+        return self
+
     @classmethod
     def load(cls, path: str | Path) -> "Bundle":
         path = Path(path)
@@ -137,6 +192,9 @@ class Bundle:
             modality=emb.get("modality", "text"),
             content_hash=manifest.get("content_hash"),
         )
+        sae_meta = manifest.get("sae") or {}
+        b.sae_k = int(sae_meta.get("k", 0))
+        b.faithfulness = manifest.get("faithfulness") or {}
         wpath = path / "weights.npz"
         if wpath.exists():
             w = np.load(wpath)
@@ -145,8 +203,14 @@ class Bundle:
                 b.b_enc = w["b_enc"]
                 b.w_dec = w["w_dec"]
                 b.b_dec = w["b_dec"]
+            if "sae_threshold" in w:
+                b.sae_threshold = w["sae_threshold"]
             if "concept_dirs" in w:
                 b.concept_dirs = w["concept_dirs"]
+            if "mean" in w:
+                b.mean = w["mean"]
+            if "whitening" in w:
+                b.whitening = w["whitening"]
         b.signature = manifest.get("signature")
         fp = path / "features.json"
         if fp.exists():
@@ -233,6 +297,31 @@ class Bundle:
             self.aspects[name] = aspect
         return self
 
+    def add_cross_modal_concept(
+        self,
+        name: str,
+        direction: np.ndarray,
+        source_modality: str = "text",
+    ) -> "Bundle":
+        """Register a concept defined in one modality's encoder and applied in a shared,
+        cross-modal space (CLIP-style): e.g. a *text* direction used to explain *image*
+        embeddings. Clearly tagged so consumers know it is semantic/cross-modal, not a CAV
+        fit on in-modality examples.
+        """
+        d = np.asarray(direction, dtype=np.float32).ravel()
+        n = np.linalg.norm(d)
+        if n > 0:
+            d = d / n
+        if self.concept_dirs is None:
+            self.concept_dirs = d.reshape(1, -1)
+        else:
+            self.concept_dirs = np.vstack([self.concept_dirs, d.reshape(1, -1)])
+        self.concept_names.append(name)
+        self.concept_conf.append(0.0)  # unvalidated in-modality; it's a semantic transfer
+        self.concept_source.append("cross_modal")
+        self.aspects[name] = f"cross-modal:{source_modality}→{self.modality}"
+        return self
+
     def rename_feature(self, index: int, name: str, source: str = "manual") -> "Bundle":
         """Manually (re)name a feature — user override of auto/AI-proposed names."""
         if index >= len(self.feature_names):
@@ -248,6 +337,14 @@ class Bundle:
 
         return dict(Counter(s for s in self.feature_source if s))
 
+    def certify(self, vectors, **kw) -> dict:
+        """Compute and attach a faithfulness scorecard (T2.3), covered by the content hash."""
+        from .eval.certify import certify as _certify
+
+        card = _certify(self, vectors, **kw)
+        self.content_hash = self.compute_hash()
+        return card
+
     # ---- native bridges -------------------------------------------------------
     def to_native_sae(self):
         from ._native import PySae
@@ -255,13 +352,21 @@ class Bundle:
         n = self.n_features
         names = list(self.feature_names) + [None] * (n - len(self.feature_names))
         conf = list(self.feature_conf) + [None] * (n - len(self.feature_conf))
-        sae = PySae(
+        threshold = (
+            np.ascontiguousarray(self.sae_threshold, dtype=np.float32)
+            if self.sae_threshold is not None
+            else None
+        )
+        # zero-copy construction straight from the numpy weight buffers (T2.4)
+        sae = PySae.from_numpy(
             self.dim,
             n,
-            np.ascontiguousarray(self.w_enc, dtype=np.float32).tobytes(),
-            np.ascontiguousarray(self.b_enc, dtype=np.float32).tobytes(),
-            np.ascontiguousarray(self.w_dec, dtype=np.float32).tobytes(),
-            np.ascontiguousarray(self.b_dec, dtype=np.float32).tobytes(),
+            np.ascontiguousarray(self.w_enc, dtype=np.float32),
+            np.ascontiguousarray(self.b_enc, dtype=np.float32),
+            np.ascontiguousarray(self.w_dec, dtype=np.float32),
+            np.ascontiguousarray(self.b_dec, dtype=np.float32),
+            int(self.sae_k),
+            threshold,
         )
         sae.set_labels(names[:n], conf[:n])
         return sae

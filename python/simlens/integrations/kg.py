@@ -30,17 +30,19 @@ def _default_format(concepts: list[dict]) -> str:
 
 
 class KnowledgeGraphExplainer:
-    def __init__(self, bundle_or_explainer, level: str | None = None, top_k: int = 5, edge_formatter=None):
+    def __init__(self, bundle_or_explainer, level: str | None = None, top_k: int = 5,
+                 edge_formatter=None, center: bool | None = None):
         self.ex = bundle_or_explainer if isinstance(bundle_or_explainer, Explainer) else Explainer(bundle_or_explainer)
         self.level = level or self.ex.preferred_level()
         self.top_k = top_k
         self.fmt = edge_formatter or _default_format
+        self.center = self.ex.has_centering if center is None else center
 
     # ---- edges ---------------------------------------------------------------
     def explain_edge(self, a, b, level: str | None = None) -> dict:
         """A domain-explained similarity edge between two node vectors."""
         level = level or self.level
-        attr = self.ex.explain(a, b, level=level, top_k=self.top_k)
+        attr = self.ex.explain(a, b, level=level, top_k=self.top_k, center=self.center)
         dims = self.ex.explain(a, b, level="dim", top_k=self.top_k)
         concepts = [
             {
@@ -79,7 +81,8 @@ class KnowledgeGraphExplainer:
     def propose_edges(self, nodes: dict, threshold: float = 0.6, level: str | None = None) -> list[dict]:
         """All node pairs above `threshold` become explained, typed edges.
 
-        `nodes` maps id -> vector. O(n²); intended for a campaign-sized node set.
+        `nodes` maps id -> vector. O(n²) exhaustive; for larger node sets prefer
+        `propose_edges_knn`, which is O(n·k).
         """
         ids = list(nodes)
         vecs = {i: np.asarray(nodes[i], np.float32).ravel().tolist() for i in ids}
@@ -91,9 +94,85 @@ class KnowledgeGraphExplainer:
                 if s < threshold:
                     continue
                 e = self.explain_edge(vecs[a], vecs[b], level=level)
-                top = next((c["name"] for c in e["concepts"] if c.get("name")), "similar")
+                top = next(
+                    (c["name"] for c in e["concepts"]
+                     if c.get("name") and not str(c["name"]).startswith(("(bias", "feat:", "dim:"))),
+                    "similar",
+                )
                 edges.append({"source": a, "target": b, "type": top, **e})
         return edges
+
+    def propose_edges_knn(
+        self,
+        nodes: dict,
+        k: int = 10,
+        threshold: float = 0.6,
+        level: str | None = None,
+    ) -> list[dict]:
+        """kNN candidate generation → explained edges in O(n·k) instead of O(n²).
+
+        Each node's top-``k`` neighbours (by the bundle's metric) become candidate edges;
+        only those above ``threshold`` are explained. Uses ``hnswlib`` when installed for
+        sublinear search, else a vectorized numpy top-k. Edges are de-duplicated.
+        """
+        ids = list(nodes)
+        X = np.asarray([np.asarray(nodes[i], np.float32).ravel() for i in ids], np.float32)
+        n = len(ids)
+        if n <= 1:
+            return []
+        k = min(k, n - 1)
+        neighbors = self._knn(X, k)
+
+        seen: set = set()
+        edges = []
+        for xi in range(n):
+            for yi in neighbors[xi]:
+                if yi == xi:
+                    continue
+                key = (xi, yi) if xi < yi else (yi, xi)
+                if key in seen:
+                    continue
+                seen.add(key)
+                a, b = ids[key[0]], ids[key[1]]
+                s = _score(X[key[0]].tolist(), X[key[1]].tolist(), self.ex.metric)
+                if s < threshold:
+                    continue
+                e = self.explain_edge(X[key[0]], X[key[1]], level=level)
+                top = next(
+                    (c["name"] for c in e["concepts"]
+                     if c.get("name") and not str(c["name"]).startswith(("(bias", "feat:", "dim:"))),
+                    "similar",
+                )
+                edges.append({"source": a, "target": b, "type": top, **e})
+        return edges
+
+    def _knn(self, X: np.ndarray, k: int) -> np.ndarray:
+        """Top-k neighbour indices per row (excluding self)."""
+        cosine = self.ex.metric == "cosine"
+        Q = X.astype(np.float64)
+        if cosine:
+            Q = Q / np.maximum(np.linalg.norm(Q, axis=1, keepdims=True), 1e-12)
+        try:  # sublinear ANN when available
+            import hnswlib
+
+            space = "cosine" if cosine else ("ip" if self.ex.metric == "dot" else "l2")
+            idx = hnswlib.Index(space=space, dim=X.shape[1])
+            idx.init_index(max_elements=len(X), ef_construction=200, M=16)
+            idx.add_items(Q, np.arange(len(X)))
+            idx.set_ef(max(k + 1, 50))
+            labels, _ = idx.knn_query(Q, k=k + 1)
+            return labels
+        except ImportError:
+            pass
+        # exact numpy fallback (still O(n²) memory but vectorized; for modest n)
+        if self.ex.metric == "euclidean":
+            sq = (Q ** 2).sum(1)
+            d = sq[:, None] + sq[None, :] - 2 * Q @ Q.T
+            np.fill_diagonal(d, np.inf)
+            return np.argpartition(d, k, axis=1)[:, :k]
+        S = Q @ Q.T
+        np.fill_diagonal(S, -np.inf)
+        return np.argpartition(-S, k, axis=1)[:, :k]
 
     # ---- concept layer -------------------------------------------------------
     def concept_profile(self, vector) -> list[dict]:

@@ -13,12 +13,14 @@ from ._util import reasons_sentence
 
 class RagExplainer:
     def __init__(self, bundle_or_explainer=None, store=None, level: str | None = None,
-                 top_k: int = 5, spurious: set | None = None):
+                 top_k: int = 5, spurious: set | None = None, center: bool | None = None):
         self.ex = bundle_or_explainer if isinstance(bundle_or_explainer, Explainer) else Explainer(bundle_or_explainer)
         self.store = store
         self.level = level or self.ex.preferred_level()
         self.top_k = top_k
         self.spurious = set(spurious or [])
+        # default the human-facing "why" to the centered view when the bundle supports it
+        self.center = self.ex.has_centering if center is None else center
 
     def _vecs(self, hits) -> list:
         """Accept hits as vectors, or as ids to fetch from the configured store."""
@@ -35,7 +37,7 @@ class RagExplainer:
         out = []
         top_vec = vecs[0] if vecs else None
         for rank, v in enumerate(vecs):
-            a = self.ex.explain(query, v, level=self.level, top_k=self.top_k)
+            a = self.ex.explain(query, v, level=self.level, top_k=self.top_k, center=self.center)
             flagged = [c.label for c in a.contributions if c.name in self.spurious]
             row = {
                 "rank": rank,

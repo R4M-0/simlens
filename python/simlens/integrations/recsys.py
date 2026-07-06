@@ -17,14 +17,16 @@ def _profile(liked) -> np.ndarray:
 
 
 class RecsysExplainer:
-    def __init__(self, bundle_or_explainer, level: str | None = None, top_k: int = 5):
+    def __init__(self, bundle_or_explainer, level: str | None = None, top_k: int = 5,
+                 center: bool | None = None):
         self.ex = bundle_or_explainer if isinstance(bundle_or_explainer, Explainer) else Explainer(bundle_or_explainer)
         self.level = level or self.ex.preferred_level()
         self.top_k = top_k
+        self.center = self.ex.has_centering if center is None else center
 
     def because(self, liked, item) -> dict:
         """Why `item` is recommended given the user's liked item(s)."""
-        a = self.ex.explain(_profile(liked), item, level=self.level, top_k=self.top_k)
+        a = self.ex.explain(_profile(liked), item, level=self.level, top_k=self.top_k, center=self.center)
         return {"score": round(a.score, 4), "why": reasons_sentence(a),
                 "concepts": [{"name": c.label, "weight": round(c.value, 4),
                               "confidence": c.confidence, "evidence": c.evidence} for c in a.contributions]}

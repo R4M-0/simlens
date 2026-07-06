@@ -16,6 +16,11 @@ def _vec(x) -> list:
     return np.asarray(x, dtype=np.float32).ravel().tolist()
 
 
+def _arr(x) -> np.ndarray:
+    """Contiguous float32 view for the zero-copy numpy FFI paths (T2.4)."""
+    return np.ascontiguousarray(np.asarray(x, dtype=np.float32).ravel())
+
+
 def _key(*parts) -> str:
     h = hashlib.sha256()
     for p in parts:
@@ -47,6 +52,16 @@ class Explainer:
         self._sae = bundle.to_native_sae() if (bundle and bundle.has_sae) else None
         self._cav = bundle.to_native_cav() if (bundle and bundle.has_concepts) else None
         self._hash = bundle.content_hash if bundle else None
+        self._mean = (
+            np.asarray(bundle.mean, dtype=np.float64)
+            if bundle is not None and bundle.mean is not None
+            else None
+        )
+        self._whitening = (
+            np.asarray(bundle.whitening, dtype=np.float64)
+            if bundle is not None and bundle.whitening is not None
+            else None
+        )
         self._auto_downgrade = auto_downgrade
         self._cache: dict | None = {} if cache else None
 
@@ -134,6 +149,17 @@ class Explainer:
                 f"{self.metric!r}; use level='dim' (exact for any metric)"
             )
 
+    # ---- anisotropy correction (T2.2) ----------------------------------------
+    @property
+    def has_centering(self) -> bool:
+        return self._mean is not None
+
+    def _apply_center(self, x) -> list:
+        from .anisotropy import apply_centering
+
+        xc = apply_centering(x, self._mean, self._whitening)
+        return xc.astype(np.float32).tolist()
+
     def explain(
         self,
         query,
@@ -141,9 +167,12 @@ class Explainer:
         level: str | None = None,
         top_k: int = 8,
         min_abs: float = 0.0,
+        center: bool = False,
     ) -> Attribution:
         level = level or self._default_level()
         self._require_similarity_metric(level)
+        if center:
+            return self._explain_centered(query, candidate, level, top_k, min_abs)
         q, c = _vec(query), _vec(candidate)
 
         ck = None
@@ -153,11 +182,11 @@ class Explainer:
                 return self._cache[ck]
 
         if level == "dim":
-            d = _native.explain_l1(q, c, self.metric, top_k, min_abs)
+            d = _native.explain_l1_np(_arr(query), _arr(candidate), self.metric, top_k, min_abs)
         elif level == "feature":
             if self._sae is None:
                 raise ValueError("no SAE in bundle; use level='dim' or attach a bundle")
-            d = self._sae.explain(q, c, self.metric, top_k, min_abs)
+            d = self._sae.explain_np(_arr(query), _arr(candidate), self.metric, top_k, min_abs)
         elif level == "concept":
             if self._cav is None:
                 raise ValueError("no concepts in bundle; use level='dim'/'feature'")
@@ -187,6 +216,46 @@ class Explainer:
             self._cache[ck] = attr
         return attr
 
+    def _explain_centered(self, query, candidate, level, top_k, min_abs) -> Attribution:
+        """The centered "why": decompose the anisotropy-corrected score so discriminative
+        structure surfaces instead of the shared global-mean baseline.
+
+        - ``dim``: exact decomposition of the centered score ``(q−μ)ᵀW·(c−μ)ᵀW``.
+        - ``feature``/``concept``: the *excess over a typical item* — ``s(q,c) − s(q,μ)`` —
+          decomposed by feature/concept (completeness holds w.r.t. that centered score).
+
+        The raw score is always reported in a warning so nothing is hidden.
+        """
+        if self._mean is None:
+            raise ValueError(
+                "center=True needs a bundle with a corpus mean; run autofit (which computes "
+                "it) or set bundle.mean / bundle.whitening"
+            )
+        raw = float(_native.score(_vec(query), _vec(candidate), self.metric))
+        if level == "dim":
+            qc, cc = self._apply_center(query), self._apply_center(candidate)
+            d = _native.explain_l1(qc, cc, self.metric, top_k, min_abs)
+            attr = self._stamp(Attribution.from_dict(d))
+            object.__setattr__(
+                attr,
+                "warnings",
+                attr.warnings + [f"centered: score is the mean-centered {self.metric} "
+                                 f"(raw {self.metric}={raw:.4f})"],
+            )
+            return attr
+        # feature/concept: excess over the corpus centroid μ (reuses μ, exact completeness)
+        a = self.explain(query, candidate, level=level, top_k=10_000)
+        mu = self._mean.astype(np.float32)
+        b = self.explain(query, mu, level=level, top_k=10_000)
+        diff = self._diff(a, b, level, top_k)
+        object.__setattr__(
+            diff,
+            "warnings",
+            ["centered: contributions are the excess similarity over a typical item "
+             f"(corpus centroid); raw {self.metric}={raw:.4f}"],
+        )
+        return self._stamp(self._enrich(diff))
+
     def explain_dissimilarity(self, query, candidate, top_k: int = 8) -> Attribution:
         """Why are these *not more* similar? Surface strong one-sided SAE features (§13.4).
 
@@ -197,8 +266,8 @@ class Explainer:
         if self._sae is None:
             raise ValueError("dissimilarity needs an SAE bundle")
         self._require_similarity_metric("feature")
-        aq = np.asarray(self._sae.encode(self._eff(query)))
-        ac = np.asarray(self._sae.encode(self._eff(candidate)))
+        aq = np.asarray(self._sae.encode_np(_arr(self._eff(query))))
+        ac = np.asarray(self._sae.encode_np(_arr(self._eff(candidate))))
         dec = np.asarray(self._sae.dec_norm2)
         names = (self.bundle.feature_names if self.bundle else []) or []
 
@@ -278,7 +347,7 @@ class Explainer:
     ) -> Attribution:
         level = level or self._default_level()
         if level == "dim":
-            d = _native.explain_margin(_vec(query), _vec(better), _vec(worse), self.metric, top_k)
+            d = _native.explain_margin_np(_arr(query), _arr(better), _arr(worse), self.metric, top_k)
             return self._stamp(Attribution.from_dict(d))
         # feature/concept margin: difference of two attributions by id
         a = self.explain(query, better, level=level, top_k=10_000)

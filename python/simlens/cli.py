@@ -16,6 +16,9 @@ def _info(args):
     named = sum(1 for n in b.feature_names if n)
     print(f"named features: {named}/{b.n_features}")
     print(f"concepts: {b.concept_names}")
+    if b.faithfulness:
+        print("faithfulness scorecard:")
+        print(json.dumps(b.faithfulness, indent=2))
 
 
 def _verify(args):

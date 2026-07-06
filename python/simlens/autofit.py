@@ -17,7 +17,7 @@ import numpy as np
 
 from .bundle import Bundle
 from .naming.keyword import KeywordNamer
-from .train import SAE, build_bundle
+from .train import build_bundle, fit
 
 _TEXT_KEYS = ("text", "name", "content", "title", "smiles", "label")
 
@@ -81,15 +81,20 @@ def autofit(
     embedder: str = "unknown",
     metric: str = "cosine",
     sample: int = 20_000,
+    arch: str = "topk",
+    k: int = 32,
     expansion: int = 8,
     epochs: int = 60,
     l1: float = 1e-3,
-    sae: SAE | None = None,
+    backend: str = "numpy",
+    sae=None,
     labelers: dict | None = None,
     namer=None,
     text_concepts: dict | None = None,
     embed_text=None,
     discover_concepts: bool = True,
+    center: str | None = "abtt",
+    certify: bool = True,
     min_confidence: float = 0.3,
     seed: int = 0,
 ) -> Bundle:
@@ -101,12 +106,21 @@ def autofit(
     if vectors is None:
         raise ValueError("provide a `store` or `vectors=`")
     X = np.asarray(vectors, dtype=np.float32)
+    # For cosine, the metric operates on unit vectors — so train the SAE (and compute the
+    # centering baseline) on unit-normalized vectors too, matching what `explain` feeds the
+    # SAE at inference. This keeps feature-level reconstruction faithful (train == inference).
+    if metric == "cosine":
+        norms = np.linalg.norm(X, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        X = (X / norms).astype(np.float32)
     payloads = payloads or [{} for _ in range(len(X))]
     items = items or _items_from_payloads(payloads)
 
     # 2. train (or reuse) the SAE -------------------------------------------
     if sae is None:
-        sae = SAE(dim=X.shape[1], expansion=expansion, l1=l1, seed=seed).fit(X, epochs=epochs)
+        extra = {"l1": l1} if arch == "relu" else {}
+        sae = fit(X, arch=arch, k=k, expansion=expansion, epochs=epochs, seed=seed,
+                  backend=backend, **extra)
 
     # 3. payload labelers (+ any user ones) → free feature names ------------
     auto = derive_payload_labelers(payloads)
@@ -117,13 +131,25 @@ def autofit(
 
     # 4. name the still-unnamed features with a Namer -----------------------
     namer = namer if namer is not None else KeywordNamer()
+    scored = hasattr(namer, "name_scored") and items is not None
+    H = sae.encode(X) if scored else None
     for f, name in enumerate(bundle.feature_names):
         if name is not None:
             continue
         exemplars = bundle.feature_exemplars.get(str(f)) or _top_exemplars(sae, X, items, f)
         if not exemplars:
             continue
-        label, conf = namer.name(exemplars)
+        if scored:
+            # decile-sampled generation + held-out detection scoring (T1.1b)
+            from .naming.autointerp import decile_exemplars, negative_exemplars
+
+            col = H[:, f]
+            gen = decile_exemplars(col, items, n_per_decile=1)
+            pos = decile_exemplars(col, items, n_per_decile=1, seed=7)
+            neg = negative_exemplars(col, items, n=max(len(pos), 3))
+            label, conf = namer.name_scored(gen or exemplars, pos or exemplars, neg)
+        else:
+            label, conf = namer.name(exemplars)
         if label:
             bundle.feature_names[f] = label
             bundle.feature_conf[f] = conf
@@ -141,6 +167,20 @@ def autofit(
             phrases = phrase if isinstance(phrase, (list, tuple)) else [phrase]
             direction = np.mean([np.asarray(embed_text(p), np.float32).ravel() for p in phrases], axis=0)
             bundle.add_text_concept(name, direction, aspect="text")
+
+    # 6. anisotropy correction (T2.2) — the centered "why" baseline ---------
+    if center:
+        from .anisotropy import fit_centering
+
+        mu, W = fit_centering(X, mode=center)
+        bundle.mean = mu
+        bundle.whitening = W
+
+    # 7. faithfulness certification (T2.3) — a signed quality scorecard ------
+    if certify:
+        from .eval.certify import certify as _certify
+
+        _certify(bundle, X, n_pairs=min(20, len(X) // 2))
 
     # stamp provenance so explanations carry a hash even before the bundle is saved
     bundle.content_hash = bundle.compute_hash()
