@@ -20,8 +20,9 @@ jobs:
         platform:
           - { runner: ubuntu-latest, target: x86_64 }
           - { runner: ubuntu-latest, target: aarch64 }
-          - { runner: macos-latest, target: aarch64 }
-          - { runner: macos-13, target: x86_64 }
+          # one universal2 wheel covers both Apple-Silicon and Intel Macs, built on the
+          # plentiful arm64 runner — avoids the scarce `macos-13` Intel pool entirely.
+          - { runner: macos-latest, target: universal2-apple-darwin }
           - { runner: windows-latest, target: x64 }
     steps:
       - uses: actions/checkout@v4
