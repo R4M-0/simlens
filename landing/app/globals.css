@@ -98,6 +98,29 @@ a:hover {
 }
 .nav .gh:hover { border-color: var(--accent); }
 
+@media (max-width: 760px) {
+  .site-header .inner {
+    flex-wrap: wrap;
+    padding: 10px 16px;
+    gap: 8px;
+  }
+  /* nav drops to its own row and scrolls sideways without a scrollbar */
+  .nav {
+    flex-basis: 100%;
+    margin-left: 0;
+    gap: 16px;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav a { flex-shrink: 0; font-size: 0.88rem; }
+  .nav .gh { padding: 3px 10px; }
+  html { scroll-padding-top: 108px; }
+}
+
 /* ---------- hero ---------- */
 .hero {
   padding: 96px 0 72px;
@@ -432,9 +455,32 @@ table.doc td.num { text-align: right; font-family: var(--mono); }
   align-items: start;
 }
 @media (max-width: 900px) {
-  .docs-layout { grid-template-columns: 1fr; }
-  .docs-sidebar { position: static !important; display: flex; flex-wrap: wrap; gap: 6px; }
-  .docs-sidebar .side-group { margin: 0; }
+  .docs-layout { grid-template-columns: 1fr; gap: 0; }
+  .docs-sidebar {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding: 20px 0 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    border-bottom: 1px solid var(--card-border);
+  }
+  .docs-sidebar .side-group { margin: 0; display: contents; }
+  .docs-sidebar .side-title { display: none; }
+  .docs-sidebar a {
+    border: 1px solid var(--card-border);
+    border-left: 1px solid var(--card-border);
+    border-radius: 99px;
+    padding: 4px 13px;
+    font-size: 0.8rem;
+    background: var(--bg-soft);
+    white-space: nowrap;
+  }
+  .docs-sidebar a:hover {
+    border-color: var(--accent);
+    border-left-color: var(--accent);
+  }
 }
 .docs-sidebar {
   position: sticky;
@@ -515,4 +561,42 @@ table.doc td.num { text-align: right; font-family: var(--mono); }
 .hero-demo {
   max-width: 720px;
   margin: 48px auto 0;
+}
+
+/* ---------- small screens ---------- */
+@media (max-width: 640px) {
+  .container { padding: 0 16px; }
+  .docs-layout { padding: 0 16px; }
+
+  .hero { padding: 56px 0 48px; }
+  .hero img.logo { width: 72px; height: 72px; margin-bottom: 18px; }
+  .hero .sub { font-size: 1.02rem; }
+  .hero-demo { margin-top: 36px; }
+
+  section.block { padding: 48px 0; }
+  .grid { margin-top: 28px; }
+  .levels { margin-top: 28px; }
+  .card, .level { padding: 20px; }
+
+  .btn { padding: 11px 20px; font-size: 0.92rem; }
+
+  .codeblock pre {
+    padding: 14px 16px;
+    font-size: 0.76rem;
+    line-height: 1.65;
+  }
+  .codeblock .cb-head { padding: 8px 14px; }
+
+  .prose { padding: 24px 0 56px; }
+  .prose h1 { font-size: 1.7rem; }
+  .prose h2 { font-size: 1.3rem; margin-top: 40px; }
+  .formula { padding: 12px 14px; font-size: 0.8rem; }
+  table.doc { font-size: 0.82rem; }
+  table.doc th, table.doc td { padding: 9px 12px; }
+
+  .step { grid-template-columns: 44px 1fr; gap: 12px; }
+  .step .n { width: 34px; height: 34px; border-radius: 10px; }
+
+  .site-footer { padding: 32px 0; }
+  .site-footer .inner { flex-direction: column; gap: 12px; }
 }
